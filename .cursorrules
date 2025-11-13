@@ -1,0 +1,53 @@
+# Fission MCP Server - Cursor Rules
+
+## Documentation Guidelines
+
+**IMPORTANT**: All documentation files must be placed in the `docs/` directory, except for common root-level files like:
+- `README.md` (project overview and quick start)
+- `CONTRIBUTING.md` (contribution guidelines)
+- `LICENSE` (license file)
+- `CHANGELOG.md` (if exists)
+
+### Documentation Structure
+
+- **API Documentation**: `docs/api.md` or `docs/api-reference.md`
+- **Architecture Documentation**: `docs/architecture.md`
+- **Configuration Guides**: `docs/configuration.md`
+- **Deployment Guides**: `docs/deployment.md`
+- **Development Guides**: `docs/development.md`
+- **Examples**: `docs/examples.md` or `docs/examples/`
+- **Troubleshooting**: `docs/troubleshooting.md`
+- **Any other technical documentation**: `docs/`
+
+### When Creating Documentation
+
+- Always create new documentation files in the `docs/` directory
+- Use clear, descriptive filenames (lowercase with hyphens)
+- Link to documentation from README.md when appropriate
+- Keep README.md focused on quick start and overview
+
+### Keeping Documentation Up-to-Date
+
+**CRITICAL**: When making code changes, always update the relevant documentation:
+- If you change API behavior, update `docs/api.md` or `docs/api-reference.md`
+- If you modify configuration options, update `docs/configuration.md`
+- If you change deployment process, update `docs/deployment.md`
+- If you add new features, update relevant docs and consider adding examples
+- If you fix bugs or change behavior, update `docs/troubleshooting.md` if applicable
+- Update `README.md` if the change affects quick start or overview information
+- Documentation should reflect the current state of the code at all times
+
+## Code Style
+
+- Follow Go standard formatting (`gofmt`)
+- Use `golangci-lint` for code quality checks
+- Write clear, self-documenting code with appropriate comments
+- Follow Go naming conventions (exported names start with capital letters)
+
+## Project Context
+
+This is a Go-based MCP server for managing Fission functions on Kubernetes. The project uses:
+- Kubernetes client-go for cluster interaction
+- Fission CRDs for function management
+- Model Context Protocol (MCP) for communication
+
