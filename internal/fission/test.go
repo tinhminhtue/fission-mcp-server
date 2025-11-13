@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,10 +25,17 @@ func (s *Service) TestFunction(ctx context.Context, name, namespace string, body
 		return nil, fmt.Errorf("function '%s' not found in namespace '%s': %w", name, namespace, err)
 	}
 
-	// Find HTTP trigger for this function
-	triggerURL, err := s.findHTTPTriggerURL(ctx, name, namespace)
+	// Get the function invocation URL
+	// Like the Fission CLI, we can invoke functions directly through the router
+	// without requiring an HTTP trigger. First try to find an HTTP trigger,
+	// but if none exists, use the direct router endpoint.
+	triggerURL, hasTrigger, err := s.findHTTPTriggerURL(ctx, name, namespace)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find HTTP trigger for function '%s': %w", name, err)
+		// If we can't list triggers, fall back to direct invocation
+		triggerURL = s.getDirectRouterURL(name, namespace)
+	} else if !hasTrigger {
+		// No HTTP trigger found, use direct router invocation (like CLI does)
+		triggerURL = s.getDirectRouterURL(name, namespace)
 	}
 
 	// Create HTTP request
@@ -77,11 +85,13 @@ func (s *Service) TestFunction(ctx context.Context, name, namespace string, body
 }
 
 // findHTTPTriggerURL finds the HTTP trigger URL for a given function
-func (s *Service) findHTTPTriggerURL(ctx context.Context, functionName, namespace string) (string, error) {
+// Returns: (triggerURL, hasTrigger, error)
+func (s *Service) findHTTPTriggerURL(ctx context.Context, functionName, namespace string) (string, bool, error) {
 	// List all HTTP triggers
 	triggers, err := s.client.Resource(HTTPTriggerGVR).Namespace("").List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return "", fmt.Errorf("failed to list HTTP triggers: %w", err)
+		// If we can't list triggers, return error
+		return "", false, fmt.Errorf("failed to list HTTP triggers: %w", err)
 	}
 
 	// Find trigger that references this function
@@ -91,9 +101,21 @@ func (s *Service) findHTTPTriggerURL(ctx context.Context, functionName, namespac
 			continue
 		}
 
-		// Check function reference
+		// Check function reference - handle both functionref.name and functionref.functionname
+		var fnName string
+		var fnNamespace string
 		if fnRef, ok := spec["functionref"].(map[string]interface{}); ok {
-			if fnName, ok := fnRef["name"].(string); ok && fnName == functionName {
+			if name, ok := fnRef["name"].(string); ok {
+				fnName = name
+			} else if name, ok := fnRef["functionname"].(string); ok {
+				fnName = name
+			}
+			if ns, ok := fnRef["namespace"].(string); ok {
+				fnNamespace = ns
+			}
+
+			// Check if this trigger references our function
+			if fnName == functionName && (fnNamespace == "" || fnNamespace == namespace) {
 				// Extract host and path
 				host := ""
 				if h, ok := spec["host"].(string); ok {
@@ -104,20 +126,44 @@ func (s *Service) findHTTPTriggerURL(ctx context.Context, functionName, namespac
 					path = p
 				}
 
-				// Construct URL (assuming Fission router is accessible)
-				// In production, this would use the Fission router service
+				// Construct URL
+				// If host is specified, use it; otherwise use Fission router service
 				if host != "" {
-					return fmt.Sprintf("http://%s%s", host, path), nil
+					// Use the host directly (assumes it's a full URL or hostname)
+					if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+						return fmt.Sprintf("%s%s", host, path), true, nil
+					}
+					return fmt.Sprintf("http://%s%s", host, path), true, nil
 				}
-				// Fallback: try to use Fission router service
-				// This is a simplified approach - in production, you'd query the router service
-				return fmt.Sprintf("http://router.fission/%s%s", functionName, path), nil
+
+				// Use Fission router service (default in-cluster service)
+				// Format: {routerURL}{path} where path is the relativeurl from the trigger
+				routerURL := s.routerURL
+				if strings.HasSuffix(routerURL, "/") {
+					routerURL = strings.TrimSuffix(routerURL, "/")
+				}
+				// Ensure path starts with /
+				if !strings.HasPrefix(path, "/") {
+					path = "/" + path
+				}
+				return fmt.Sprintf("%s%s", routerURL, path), true, nil
 			}
 		}
 	}
 
-	// If no trigger found, try direct invocation via Fission router
-	// This assumes the function can be invoked via /fission-function/{name}
-	return fmt.Sprintf("http://router.fission/fission-function/%s", functionName), nil
+	// No trigger found
+	return "", false, nil
 }
 
+// getDirectRouterURL returns the direct router URL for invoking a function
+// This matches how the Fission CLI tests functions without HTTP triggers
+func (s *Service) getDirectRouterURL(functionName, namespace string) string {
+	// Fission router direct invocation format: {routerURL}/{namespace}/{function}
+	// This is the same format used by the CLI's "fission function test" command
+	routerURL := s.routerURL
+	// Remove trailing slash if present
+	if strings.HasSuffix(routerURL, "/") {
+		routerURL = strings.TrimSuffix(routerURL, "/")
+	}
+	return fmt.Sprintf("%s/%s/%s", routerURL, namespace, functionName)
+}

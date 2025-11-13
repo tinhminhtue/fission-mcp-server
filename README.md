@@ -74,6 +74,10 @@ const (
 ### Environment Variables
 
 - `KUBECONFIG`: Path to kubeconfig file (defaults to `~/.kube/config`)
+- `PORT`: Server port (defaults to `8080`)
+- `FISSION_ROUTER_URL`: Fission router URL for function testing (defaults to `http://router.fission`)
+  - Use `http://localhost:8888` if port-forwarding the router: `kubectl port-forward -n fission svc/router 8888:80`
+  - Use the external URL if the router is exposed via Ingress/LoadBalancer
 
 ## Project Structure
 

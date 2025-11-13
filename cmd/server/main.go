@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	defaultPort = "8080"
+	defaultPort      = "8080"
+	defaultRouterURL = "http://router.fission.svc.cluster.local"
 )
 
 func main() {
@@ -23,8 +24,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Get router URL from environment variable or use default
+	routerURL := os.Getenv("FISSION_ROUTER_URL")
+	if routerURL == "" {
+		routerURL = defaultRouterURL
+	}
+
 	// Create Fission service
-	fissionService := fission.NewService(dynamicClient)
+	fissionService := fission.NewService(dynamicClient, routerURL)
 
 	// Setup HTTP router
 	router := api.SetupRouter(fissionService)
@@ -38,6 +45,7 @@ func main() {
 	// Start HTTP server
 	addr := ":" + port
 	log.Printf("Starting Fission MCP Server on %s", addr)
+	log.Printf("Fission Router URL: %s", routerURL)
 	log.Printf("API endpoints:")
 	log.Printf("  GET  /api/v1/functions - List all Fission functions")
 	log.Printf("  POST /api/v1/functions - Create a new Fission function")
