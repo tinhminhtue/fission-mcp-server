@@ -12,25 +12,25 @@ LDFLAGS=-ldflags "-s -w"
 ## build: Build the binary for current platform
 build:
 	@echo "Building $(BINARY_NAME)..."
-	@go build $(LDFLAGS) -o $(BINARY_NAME) main.go
+	@go build $(LDFLAGS) -o $(BINARY_NAME) ./cmd/server
 	@echo "Build complete: $(BINARY_NAME)"
 
 ## build-linux: Build the binary for Linux
 build-linux:
 	@echo "Building $(BINARY_NAME) for Linux..."
-	@GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-linux main.go
+	@GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-linux ./cmd/server
 	@echo "Build complete: $(BINARY_NAME)-linux"
 
 ## build-darwin: Build the binary for macOS
 build-darwin:
 	@echo "Building $(BINARY_NAME) for macOS..."
-	@GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-darwin main.go
+	@GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-darwin ./cmd/server
 	@echo "Build complete: $(BINARY_NAME)-darwin"
 
 ## build-windows: Build the binary for Windows
 build-windows:
 	@echo "Building $(BINARY_NAME) for Windows..."
-	@GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-windows.exe main.go
+	@GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-windows.exe ./cmd/server
 	@echo "Build complete: $(BINARY_NAME)-windows.exe"
 
 ## build-all: Build binaries for all platforms
@@ -52,7 +52,7 @@ test-coverage:
 ## run: Run the application
 run:
 	@echo "Running $(BINARY_NAME)..."
-	@go run main.go
+	@go run ./cmd/server
 
 ## clean: Remove build artifacts
 clean:
