@@ -34,10 +34,17 @@ func SetupRouter(fissionService *fission.Service) http.Handler {
 		w.Write([]byte("OK"))
 	})
 
-	// OpenAPI specification endpoint
+	// OpenAPI specification endpoints (YAML and JSON)
 	mux.HandleFunc("/openapi.yaml", handler.ServeOpenAPI)
+	mux.HandleFunc("/openapi.json", handler.ServeOpenAPI)
 	mux.HandleFunc("/api/v1/openapi.yaml", handler.ServeOpenAPI)
+	mux.HandleFunc("/api/v1/openapi.json", handler.ServeOpenAPI)
+
+	// Swagger UI endpoint
+	mux.HandleFunc("/swagger", handler.ServeSwaggerUI)
+	mux.HandleFunc("/swagger/", handler.ServeSwaggerUI)
+	mux.HandleFunc("/docs", handler.ServeSwaggerUI)
+	mux.HandleFunc("/docs/", handler.ServeSwaggerUI)
 
 	return mux
 }
-

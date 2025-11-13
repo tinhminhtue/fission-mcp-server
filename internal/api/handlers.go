@@ -2,12 +2,15 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/tinhminhtue/fission-mcp-server/internal/fission"
+	"gopkg.in/yaml.v2"
 )
 
 var (
@@ -15,35 +18,60 @@ var (
 	openAPISpecOnce sync.Once
 )
 
-// loadOpenAPISpec loads the OpenAPI specification file
-func loadOpenAPISpec() ([]byte, error) {
-	var data []byte
-	var err error
+// convertToJSONCompatible converts map[interface{}]interface{} to map[string]interface{}
+// which is required for JSON encoding
+func convertToJSONCompatible(data interface{}) interface{} {
+	switch v := data.(type) {
+	case map[interface{}]interface{}:
+		result := make(map[string]interface{})
+		for k, val := range v {
+			result[fmt.Sprintf("%v", k)] = convertToJSONCompatible(val)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(v))
+		for i, val := range v {
+			result[i] = convertToJSONCompatible(val)
+		}
+		return result
+	default:
+		return data
+	}
+}
 
-	// Try multiple possible paths
-	possiblePaths := []string{
-		"docs/openapi.yaml",                    // From project root
-		"../docs/openapi.yaml",                 // From internal/api/
-		filepath.Join("..", "docs", "openapi.yaml"), // From internal/api/ (cross-platform)
+// loadOpenAPISpec loads the OpenAPI specification file from the docs directory
+func loadOpenAPISpec() ([]byte, error) {
+	// Get current working directory - this should be the project root when running
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current working directory: %w", err)
 	}
 
-	// Also try relative to executable location
+	// Try paths relative to current working directory
+	possiblePaths := []string{
+		filepath.Join(cwd, "docs", "openapi.yaml"), // From project root
+	}
+
+	// Also try relative to executable location (for deployed binaries)
 	if execPath, execErr := os.Executable(); execErr == nil {
 		execDir := filepath.Dir(execPath)
+		// Try common deployment patterns
 		possiblePaths = append(possiblePaths,
-			filepath.Join(execDir, "docs", "openapi.yaml"),
-			filepath.Join(execDir, "..", "docs", "openapi.yaml"),
+			filepath.Join(execDir, "docs", "openapi.yaml"),             // Same directory as binary
+			filepath.Join(execDir, "..", "docs", "openapi.yaml"),       // One level up
+			filepath.Join(execDir, "..", "..", "docs", "openapi.yaml"), // Two levels up
 		)
 	}
 
+	// Try each path
 	for _, path := range possiblePaths {
-		data, err = os.ReadFile(path)
+		data, err := os.ReadFile(path)
 		if err == nil {
 			return data, nil
 		}
 	}
 
-	return nil, err
+	return nil, fmt.Errorf("could not find openapi.yaml in docs directory. Tried paths: %v", possiblePaths)
 }
 
 // Handler provides HTTP handlers for the Fission API
@@ -156,7 +184,7 @@ func (h *Handler) writeError(w http.ResponseWriter, statusCode int, message stri
 	h.writeJSON(w, statusCode, ErrorResponse{Error: message})
 }
 
-// ServeOpenAPI handles GET /openapi.yaml and GET /api/v1/openapi.yaml
+// ServeOpenAPI handles GET /openapi.yaml, GET /openapi.json, GET /api/v1/openapi.yaml, and GET /api/v1/openapi.json
 func (h *Handler) ServeOpenAPI(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -164,22 +192,117 @@ func (h *Handler) ServeOpenAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load the spec file once (thread-safe)
+	var loadErr error
 	openAPISpecOnce.Do(func() {
-		var err error
-		openAPISpec, err = loadOpenAPISpec()
-		if err != nil {
+		openAPISpec, loadErr = loadOpenAPISpec()
+		if loadErr != nil {
 			// If loading fails, set to empty to avoid repeated attempts
 			openAPISpec = []byte{}
 		}
 	})
 
-	if len(openAPISpec) == 0 {
-		h.writeError(w, http.StatusInternalServerError, "Failed to load OpenAPI specification")
+	if loadErr != nil {
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to load OpenAPI specification: %v", loadErr))
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/yaml")
+	if len(openAPISpec) == 0 {
+		h.writeError(w, http.StatusInternalServerError, "OpenAPI specification is empty")
+		return
+	}
+
+	// Check if JSON format is requested
+	path := r.URL.Path
+	if strings.HasSuffix(path, ".json") {
+		// Convert YAML to JSON
+		var yamlData interface{}
+		if err := yaml.Unmarshal(openAPISpec, &yamlData); err != nil {
+			h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to parse YAML: %v", err))
+			return
+		}
+
+		// Convert map[interface{}]interface{} to map[string]interface{} for JSON encoding
+		jsonData := convertToJSONCompatible(yamlData)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(jsonData); err != nil {
+			h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to encode JSON: %v", err))
+			return
+		}
+		return
+	}
+
+	// Serve as YAML with text/yaml content type so browsers can display it
+	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	w.Header().Set("Content-Disposition", "inline")
 	w.WriteHeader(http.StatusOK)
 	w.Write(openAPISpec)
 }
 
+// ServeSwaggerUI serves the Swagger UI HTML page
+func (h *Handler) ServeSwaggerUI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Determine the spec URL based on the request
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	host := r.Host
+	specURL := fmt.Sprintf("%s://%s/openapi.json", scheme, host)
+
+	// Swagger UI HTML with CDN
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fission MCP Server API - Swagger UI</title>
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui.css" />
+  <style>
+    html {
+      box-sizing: border-box;
+      overflow: -moz-scrollbars-vertical;
+      overflow-y: scroll;
+    }
+    *, *:before, *:after {
+      box-sizing: inherit;
+    }
+    body {
+      margin:0;
+      background: #fafafa;
+    }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-standalone-preset.js"></script>
+  <script>
+    window.onload = function() {
+      const ui = SwaggerUIBundle({
+        url: "%s",
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIStandalonePreset
+        ],
+        plugins: [
+          SwaggerUIBundle.plugins.DownloadUrl
+        ],
+        layout: "StandaloneLayout"
+      });
+    };
+  </script>
+</body>
+</html>`, specURL)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(html))
+}

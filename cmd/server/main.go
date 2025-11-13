@@ -41,12 +41,15 @@ func main() {
 	log.Printf("API endpoints:")
 	log.Printf("  GET  /api/v1/functions - List all Fission functions")
 	log.Printf("  POST /api/v1/functions - Create a new Fission function")
-	log.Printf("  GET  /openapi.yaml - OpenAPI specification")
-	log.Printf("  GET  /api/v1/openapi.yaml - OpenAPI specification")
+	log.Printf("  GET  /openapi.yaml - OpenAPI specification (YAML)")
+	log.Printf("  GET  /openapi.json - OpenAPI specification (JSON)")
+	log.Printf("  GET  /api/v1/openapi.yaml - OpenAPI specification (YAML)")
+	log.Printf("  GET  /api/v1/openapi.json - OpenAPI specification (JSON)")
+	log.Printf("  GET  /swagger - Swagger UI (interactive API documentation)")
+	log.Printf("  GET  /docs - Swagger UI (interactive API documentation)")
 	log.Printf("  GET  /health - Health check")
 
 	if err := http.ListenAndServe(addr, router); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
 }
-
