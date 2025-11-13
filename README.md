@@ -1,5 +1,7 @@
 # Fission MCP Server
 
+This project is on development and not yet released.
+
 A Go-based server for managing Fission functions on Kubernetes using the Model Context Protocol (MCP). This project provides a simple and efficient way to create, list, and manage Fission serverless functions programmatically.
 
 ## Features

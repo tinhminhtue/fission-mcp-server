@@ -1,0 +1,229 @@
+openapi: 3.0.3
+info:
+  title: Fission MCP Server API
+  description: |
+    REST API for managing Fission functions on Kubernetes.
+    This API provides endpoints to list and create Fission functions.
+  version: 1.0.0
+  contact:
+    name: Fission MCP Server
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: https://api.example.com
+    description: Production server (example)
+
+paths:
+  /api/v1/functions:
+    get:
+      summary: List all Fission functions
+      description: |
+        Retrieves a list of all Fission functions across all namespaces.
+        Returns function information including name, namespace, runtime, environment, and status.
+      operationId: listFunctions
+      tags:
+        - Functions
+      responses:
+        '200':
+          description: Successful response with list of functions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListFunctionsResponse'
+              example:
+                functions:
+                  - name: hello-world
+                    namespace: ai-code
+                    runtime: fission/python-env:latest
+                    env: python
+                    status: active
+                  - name: my-function
+                    namespace: ai-code
+                    runtime: fission/node-env:latest
+                    env: nodejs
+                    status: active
+                count: 2
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "error listing Fission functions: connection failed"
+
+    post:
+      summary: Create a new Fission function
+      description: |
+        Creates a new Fission function with the specified name, environment, and code.
+        The code will be packaged into a zip archive and deployed to Kubernetes.
+      operationId: createFunction
+      tags:
+        - Functions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFunctionRequest'
+            example:
+              name: hello-world
+              environment: python
+              code: |
+                def main():
+                    return "Hello, World!"
+      responses:
+        '201':
+          description: Function created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateFunctionResponse'
+              example:
+                message: "Function created successfully"
+                name: hello-world
+        '400':
+          description: Bad request - invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing_name:
+                  value:
+                    error: "name is required"
+                missing_environment:
+                  value:
+                    error: "environment is required"
+                missing_code:
+                  value:
+                    error: "code is required"
+                invalid_body:
+                  value:
+                    error: "Invalid request body: invalid character '}' looking for beginning of object key string"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "failed to create function: resource already exists"
+
+  /health:
+    get:
+      summary: Health check endpoint
+      description: |
+        Returns a simple health check response to verify the server is running.
+      operationId: healthCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: OK
+
+components:
+  schemas:
+    FunctionInfo:
+      type: object
+      description: Information about a Fission function
+      properties:
+        name:
+          type: string
+          description: Name of the function
+          example: hello-world
+        namespace:
+          type: string
+          description: Kubernetes namespace where the function is deployed
+          example: ai-code
+        runtime:
+          type: string
+          description: Runtime image used by the function
+          example: fission/python-env:latest
+          nullable: true
+        env:
+          type: string
+          description: Environment name (e.g., python, nodejs)
+          example: python
+          nullable: true
+        status:
+          type: string
+          description: Current status of the function
+          example: active
+          nullable: true
+      required:
+        - name
+        - namespace
+
+    ListFunctionsResponse:
+      type: object
+      description: Response containing a list of functions
+      properties:
+        functions:
+          type: array
+          items:
+            $ref: '#/components/schemas/FunctionInfo'
+          description: List of Fission functions
+        count:
+          type: integer
+          description: Total number of functions
+          example: 2
+      required:
+        - functions
+        - count
+
+    CreateFunctionRequest:
+      type: object
+      description: Request body for creating a new function
+      properties:
+        name:
+          type: string
+          description: Name of the function to create
+          example: hello-world
+        environment:
+          type: string
+          description: Environment name (e.g., python, nodejs)
+          example: python
+        code:
+          type: string
+          description: Source code for the function
+          example: |
+            def main():
+                return "Hello, World!"
+      required:
+        - name
+        - environment
+        - code
+
+    CreateFunctionResponse:
+      type: object
+      description: Response after creating a function
+      properties:
+        message:
+          type: string
+          description: Success message
+          example: "Function created successfully"
+        name:
+          type: string
+          description: Name of the created function
+          example: hello-world
+      required:
+        - message
+        - name
+
+    ErrorResponse:
+      type: object
+      description: Error response
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "An error occurred"
+      required:
+        - error
+

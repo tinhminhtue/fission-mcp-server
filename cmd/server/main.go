@@ -1,20 +1,18 @@
 package main
 
 import (
-	"context"
 	"fmt"
+	"log"
+	"net/http"
 	"os"
 
+	"github.com/tinhminhtue/fission-mcp-server/internal/api"
 	"github.com/tinhminhtue/fission-mcp-server/internal/client"
 	"github.com/tinhminhtue/fission-mcp-server/internal/fission"
 )
 
 const (
-	functionName = "hello-world2"
-	functionEnv  = "python"
-	pythonCode   = `def main():
-    return "Hello, World from hello-world2!"
-`
+	defaultPort = "8080"
 )
 
 func main() {
@@ -28,27 +26,27 @@ func main() {
 	// Create Fission service
 	fissionService := fission.NewService(dynamicClient)
 
-	ctx := context.Background()
+	// Setup HTTP router
+	router := api.SetupRouter(fissionService)
 
-	// List Fission functions
-	err = fissionService.PrintFunctions(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error listing functions: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Make sure Fission is installed and the Function CRD exists.\n")
-		os.Exit(1)
+	// Get port from environment variable or use default
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = defaultPort
 	}
 
-	// Create hello-world2 function
-	fmt.Println("\n==================================================")
-	fmt.Println("Creating hello-world2 function...")
-	fmt.Println("==================================================")
+	// Start HTTP server
+	addr := ":" + port
+	log.Printf("Starting Fission MCP Server on %s", addr)
+	log.Printf("API endpoints:")
+	log.Printf("  GET  /api/v1/functions - List all Fission functions")
+	log.Printf("  POST /api/v1/functions - Create a new Fission function")
+	log.Printf("  GET  /openapi.yaml - OpenAPI specification")
+	log.Printf("  GET  /api/v1/openapi.yaml - OpenAPI specification")
+	log.Printf("  GET  /health - Health check")
 
-	err = fissionService.CreateFunction(ctx, functionName, functionEnv, pythonCode)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating function: %v\n", err)
-		os.Exit(1)
+	if err := http.ListenAndServe(addr, router); err != nil {
+		log.Fatalf("Server failed to start: %v", err)
 	}
-
-	fmt.Printf("Successfully created function '%s'!\n", functionName)
 }
 
