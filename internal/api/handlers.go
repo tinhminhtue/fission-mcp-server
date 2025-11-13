@@ -110,6 +110,35 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// DeleteFunctionResponse represents the response for deleting a function
+type DeleteFunctionResponse struct {
+	Message string `json:"message"`
+	Name    string `json:"name"`
+}
+
+// GetFunctionResponse represents the response for getting a function
+type GetFunctionResponse struct {
+	Function fission.FunctionInfo `json:"function"`
+}
+
+// TestFunctionRequest represents the request body for testing a function
+type TestFunctionRequest struct {
+	Body    string            `json:"body"`
+	Headers map[string]string `json:"headers"`
+}
+
+// TestFunctionResponse represents the response for testing a function
+type TestFunctionResponse struct {
+	StatusCode int                 `json:"status_code"`
+	Body       string              `json:"body"`
+	Headers    map[string][]string `json:"headers"`
+}
+
+// GetFunctionLogsResponse represents the response for getting function logs
+type GetFunctionLogsResponse struct {
+	Logs string `json:"logs"`
+}
+
 // ListFunctions handles GET /api/v1/functions
 func (h *Handler) ListFunctions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -170,6 +199,170 @@ func (h *Handler) CreateFunction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeJSON(w, http.StatusCreated, response)
+}
+
+// extractFunctionName extracts the function name from the URL path
+// Expected format: /api/v1/functions/{name} or /api/v1/functions/{name}/...
+func extractFunctionName(path string) string {
+	// Remove /api/v1/functions prefix
+	prefix := "/api/v1/functions/"
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+
+	// Get the part after the prefix
+	remaining := strings.TrimPrefix(path, prefix)
+
+	// Extract function name (everything before the next /)
+	parts := strings.Split(remaining, "/")
+	return parts[0]
+}
+
+// GetFunction handles GET /api/v1/functions/{name}
+func (h *Handler) GetFunction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	name := extractFunctionName(r.URL.Path)
+	if name == "" {
+		h.writeError(w, http.StatusBadRequest, "function name is required")
+		return
+	}
+
+	// Get namespace from query parameter, default to empty (will use DefaultNamespace)
+	namespace := r.URL.Query().Get("namespace")
+
+	function, err := h.fissionService.GetFunction(r.Context(), name, namespace)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			h.writeError(w, http.StatusNotFound, err.Error())
+		} else {
+			h.writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	response := GetFunctionResponse{
+		Function: *function,
+	}
+
+	h.writeJSON(w, http.StatusOK, response)
+}
+
+// DeleteFunction handles DELETE /api/v1/functions/{name}
+func (h *Handler) DeleteFunction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	name := extractFunctionName(r.URL.Path)
+	if name == "" {
+		h.writeError(w, http.StatusBadRequest, "function name is required")
+		return
+	}
+
+	// Get namespace from query parameter, default to empty (will use DefaultNamespace)
+	namespace := r.URL.Query().Get("namespace")
+
+	err := h.fissionService.DeleteFunction(r.Context(), name, namespace)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			h.writeError(w, http.StatusNotFound, err.Error())
+		} else {
+			h.writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	response := DeleteFunctionResponse{
+		Message: "Function deleted successfully",
+		Name:    name,
+	}
+
+	h.writeJSON(w, http.StatusOK, response)
+}
+
+// TestFunction handles POST /api/v1/functions/{name}/test
+func (h *Handler) TestFunction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	name := extractFunctionName(r.URL.Path)
+	if name == "" {
+		h.writeError(w, http.StatusBadRequest, "function name is required")
+		return
+	}
+
+	// Get namespace from query parameter, default to empty (will use DefaultNamespace)
+	namespace := r.URL.Query().Get("namespace")
+
+	var req TestFunctionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// If body is empty or invalid, use empty body
+		req.Body = ""
+		req.Headers = make(map[string]string)
+	}
+
+	if req.Headers == nil {
+		req.Headers = make(map[string]string)
+	}
+
+	result, err := h.fissionService.TestFunction(r.Context(), name, namespace, req.Body, req.Headers)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, result)
+}
+
+// GetFunctionLogs handles GET /api/v1/functions/{name}/logs
+func (h *Handler) GetFunctionLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	name := extractFunctionName(r.URL.Path)
+	if name == "" {
+		h.writeError(w, http.StatusBadRequest, "function name is required")
+		return
+	}
+
+	// Get namespace from query parameter, default to empty (will use DefaultNamespace)
+	namespace := r.URL.Query().Get("namespace")
+
+	// Parse log options from query parameters
+	options := fission.LogOptions{}
+	if tail := r.URL.Query().Get("tail"); tail != "" {
+		var tailInt int
+		if _, err := fmt.Sscanf(tail, "%d", &tailInt); err == nil {
+			options.Tail = tailInt
+		}
+	}
+	if follow := r.URL.Query().Get("follow"); follow == "true" {
+		options.Follow = true
+	}
+	if since := r.URL.Query().Get("since"); since != "" {
+		options.Since = since
+	}
+
+	logs, err := h.fissionService.GetFunctionLogs(r.Context(), name, namespace, options)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	response := GetFunctionLogsResponse{
+		Logs: logs,
+	}
+
+	h.writeJSON(w, http.StatusOK, response)
 }
 
 // writeJSON writes a JSON response

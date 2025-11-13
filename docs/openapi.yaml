@@ -3,7 +3,7 @@ info:
   title: Fission MCP Server API
   description: |
     REST API for managing Fission functions on Kubernetes.
-    This API provides endpoints to list and create Fission functions.
+    This API provides endpoints to list, create, get, delete, test, and view logs for Fission functions.
   version: 1.0.0
   contact:
     name: Fission MCP Server
@@ -53,9 +53,10 @@ paths:
                 error: "error listing Fission functions: connection failed"
 
     post:
-      summary: Create a new Fission function
+      summary: Create or update a Fission function (upsert)
       description: |
-        Creates a new Fission function with the specified name, environment, and code.
+        Creates a new Fission function or updates an existing one with the specified name, environment, and code.
+        If a function with the given name already exists, it will be updated with the new environment and code.
         The code will be packaged into a zip archive and deployed to Kubernetes.
       operationId: createFunction
       tags:
@@ -74,14 +75,20 @@ paths:
                     return "Hello, World!"
       responses:
         '201':
-          description: Function created successfully
+          description: Function created or updated successfully
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CreateFunctionResponse'
-              example:
-                message: "Function created successfully"
-                name: hello-world
+              examples:
+                created:
+                  value:
+                    message: "Function created successfully"
+                    name: hello-world
+                updated:
+                  value:
+                    message: "Function updated successfully"
+                    name: hello-world
         '400':
           description: Bad request - invalid input
           content:
@@ -108,7 +115,215 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
-                error: "failed to create function: resource already exists"
+                error: "failed to create or update function: internal error"
+
+  /api/v1/functions/{name}:
+    get:
+      summary: Get a specific Fission function
+      description: |
+        Retrieves detailed information about a specific Fission function by name.
+      operationId: getFunction
+      tags:
+        - Functions
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Name of the function
+          schema:
+            type: string
+            example: hello-world
+        - name: namespace
+          in: query
+          required: false
+          description: Kubernetes namespace (defaults to ai-code)
+          schema:
+            type: string
+            example: ai-code
+      responses:
+        '200':
+          description: Successful response with function details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetFunctionResponse'
+        '404':
+          description: Function not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "function 'hello-world' not found in namespace 'ai-code'"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: Delete a Fission function
+      description: |
+        Deletes a Fission function by name. This operation cannot be undone.
+      operationId: deleteFunction
+      tags:
+        - Functions
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Name of the function to delete
+          schema:
+            type: string
+            example: hello-world
+        - name: namespace
+          in: query
+          required: false
+          description: Kubernetes namespace (defaults to ai-code)
+          schema:
+            type: string
+            example: ai-code
+      responses:
+        '200':
+          description: Function deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteFunctionResponse'
+        '404':
+          description: Function not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "function 'hello-world' not found in namespace 'ai-code'"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/functions/{name}/test:
+    post:
+      summary: Test/invoke a Fission function
+      description: |
+        Invokes a Fission function and returns the response. This endpoint tests the function
+        by making an HTTP request to the function's trigger endpoint.
+      operationId: testFunction
+      tags:
+        - Functions
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Name of the function to test
+          schema:
+            type: string
+            example: hello-world
+        - name: namespace
+          in: query
+          required: false
+          description: Kubernetes namespace (defaults to ai-code)
+          schema:
+            type: string
+            example: ai-code
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestFunctionRequest'
+            example:
+              body: '{"key": "value"}'
+              headers:
+                Content-Type: application/json
+      responses:
+        '200':
+          description: Function invoked successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestFunctionResponse'
+        '404':
+          description: Function not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/functions/{name}/logs:
+    get:
+      summary: Get function logs
+      description: |
+        Retrieves logs from pods running the specified Fission function.
+        Supports filtering by time range and limiting the number of lines returned.
+      operationId: getFunctionLogs
+      tags:
+        - Functions
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Name of the function
+          schema:
+            type: string
+            example: hello-world
+        - name: namespace
+          in: query
+          required: false
+          description: Kubernetes namespace (defaults to ai-code)
+          schema:
+            type: string
+            example: ai-code
+        - name: tail
+          in: query
+          required: false
+          description: Number of lines to tail from the end of logs
+          schema:
+            type: integer
+            example: 100
+        - name: since
+          in: query
+          required: false
+          description: Time range to retrieve logs (e.g., "5m", "1h")
+          schema:
+            type: string
+            example: 5m
+        - name: follow
+          in: query
+          required: false
+          description: Follow logs (streaming) - currently not supported
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Successful response with function logs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetFunctionLogsResponse'
+        '404':
+          description: Function or pods not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /health:
     get:
@@ -156,6 +371,11 @@ components:
           description: Current status of the function
           example: active
           nullable: true
+        package:
+          type: string
+          description: Name of the package associated with the function
+          example: hello-world-pkg
+          nullable: true
       required:
         - name
         - namespace
@@ -179,7 +399,7 @@ components:
 
     CreateFunctionRequest:
       type: object
-      description: Request body for creating a new function
+      description: Request body for creating or updating a function (upsert operation)
       properties:
         name:
           type: string
@@ -202,11 +422,11 @@ components:
 
     CreateFunctionResponse:
       type: object
-      description: Response after creating a function
+      description: Response after creating or updating a function
       properties:
         message:
           type: string
-          description: Success message
+          description: Success message indicating whether the function was created or updated
           example: "Function created successfully"
         name:
           type: string
@@ -226,4 +446,88 @@ components:
           example: "An error occurred"
       required:
         - error
+
+    GetFunctionResponse:
+      type: object
+      description: Response containing a single function
+      properties:
+        function:
+          $ref: '#/components/schemas/FunctionInfo'
+      required:
+        - function
+
+    DeleteFunctionResponse:
+      type: object
+      description: Response after deleting a function
+      properties:
+        message:
+          type: string
+          description: Success message
+          example: "Function deleted successfully"
+        name:
+          type: string
+          description: Name of the deleted function
+          example: hello-world
+      required:
+        - message
+        - name
+
+    TestFunctionRequest:
+      type: object
+      description: Request body for testing a function
+      properties:
+        body:
+          type: string
+          description: Request body to send to the function
+          example: '{"key": "value"}'
+        headers:
+          type: object
+          description: Custom headers to include in the request
+          additionalProperties:
+            type: string
+          example:
+            Content-Type: application/json
+      required: []
+
+    TestFunctionResponse:
+      type: object
+      description: Response from testing a function
+      properties:
+        status_code:
+          type: integer
+          description: HTTP status code from the function response
+          example: 200
+        body:
+          type: string
+          description: Response body from the function
+          example: "Hello, World!"
+        headers:
+          type: object
+          description: Response headers from the function
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          example:
+            Content-Type:
+              - application/json
+      required:
+        - status_code
+        - body
+        - headers
+
+    GetFunctionLogsResponse:
+      type: object
+      description: Response containing function logs
+      properties:
+        logs:
+          type: string
+          description: Log output from function pods
+          example: |
+            === Pod: ai-code/hello-world-abc123 ===
+            2024-01-01T10:00:00Z Function invoked
+            2024-01-01T10:00:01Z Processing request
+            2024-01-01T10:00:02Z Request completed
+      required:
+        - logs
 

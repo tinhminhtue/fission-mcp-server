@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/tinhminhtue/fission-mcp-server/internal/fission"
 )
@@ -12,7 +13,42 @@ func SetupRouter(fissionService *fission.Service) http.Handler {
 
 	mux := http.NewServeMux()
 
-	// API routes
+	// API routes for function operations
+	// Individual function routes (must be registered before the collection route)
+	mux.HandleFunc("/api/v1/functions/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Handle function-specific endpoints
+		if strings.HasSuffix(path, "/test") {
+			if r.Method == http.MethodPost {
+				handler.TestFunction(w, r)
+			} else {
+				handler.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+			}
+			return
+		}
+
+		if strings.HasSuffix(path, "/logs") {
+			if r.Method == http.MethodGet {
+				handler.GetFunctionLogs(w, r)
+			} else {
+				handler.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+			}
+			return
+		}
+
+		// Handle GET and DELETE for individual functions
+		switch r.Method {
+		case http.MethodGet:
+			handler.GetFunction(w, r)
+		case http.MethodDelete:
+			handler.DeleteFunction(w, r)
+		default:
+			handler.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		}
+	})
+
+	// Collection routes
 	mux.HandleFunc("/api/v1/functions", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

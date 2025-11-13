@@ -37,6 +37,13 @@ func (s *Service) ListFunctions(ctx context.Context) ([]FunctionInfo, error) {
 					info.Env = envName
 				}
 			}
+			if pkg, ok := spec["package"].(map[string]interface{}); ok {
+				if pkgRef, ok := pkg["packageref"].(map[string]interface{}); ok {
+					if pkgName, ok := pkgRef["name"].(string); ok {
+						info.Package = pkgName
+					}
+				}
+			}
 		}
 
 		if statusFound {
@@ -86,4 +93,3 @@ func (s *Service) PrintFunctions(ctx context.Context) error {
 
 	return nil
 }
-
