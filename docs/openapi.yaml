@@ -1,12 +1,22 @@
 openapi: 3.1.0
 info:
-  title: Fission MCP Server API
+  title: Fission HTTP Server API
   description: |
-    REST API for managing Fission functions on Kubernetes.
-    This API provides endpoints to list, create, get, delete, test, and view logs for Fission functions.
-  version: 1.0.0
+    REST API for managing Fission resources on Kubernetes.
+    This API wraps all fission-cli commands and provides HTTP endpoints for:
+    - Functions (create, list, get, update, delete, test, logs, pods, metadata)
+    - Environments (create, list, get, update, delete, pods)
+    - Packages (create, list, get source/deploy/info, update, delete, rebuild)
+    - HTTP Triggers (create, list, get, update, delete)
+    - Time Triggers (create, list, delete)
+    - MQ Triggers (create, list, delete)
+    - KubeWatches (create, list, delete)
+    - Version information
+    - System check
+    - Plugins
+  version: 2.0.0
   contact:
-    name: Fission MCP Server
+    name: Fission HTTP Server
 servers:
   - url: http://localhost:8080
     description: Local development server
@@ -14,50 +24,53 @@ servers:
     description: Production server (example)
 
 paths:
+  # Function endpoints
   /api/v1/functions:
     get:
       summary: List all Fission functions
       description: |
-        Retrieves a list of all Fission functions across all namespaces.
-        Returns function information including name, namespace, runtime, environment, and status.
+        Retrieves a list of all Fission functions.
+        Supports filtering by namespace and listing across all namespaces.
       operationId: listFunctions
       tags:
         - Functions
+      parameters:
+        - name: namespace
+          in: query
+          required: false
+          description: Kubernetes namespace to filter functions
+          schema:
+            type: string
+        - name: all_namespaces
+          in: query
+          required: false
+          description: List functions across all namespaces
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Successful response with list of functions
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListFunctionsResponse'
-              example:
-                functions:
-                  - name: hello-world
-                    namespace: ai-code
-                    runtime: fission/python-env:latest
-                    env: python
-                    status: active
-                  - name: my-function
-                    namespace: ai-code
-                    runtime: fission/node-env:latest
-                    env: nodejs
-                    status: active
-                count: 2
+                type: object
+                properties:
+                  output:
+                    type: string
+                    description: Tabular output from fission-cli
         '500':
           description: Internal server error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: "error listing Fission functions: connection failed"
 
     post:
-      summary: Create or update a Fission function (upsert)
+      summary: Create a Fission function
       description: |
-        Creates a new Fission function or updates an existing one with the specified name, environment, and code.
-        If a function with the given name already exists, it will be updated with the new environment and code.
-        The code will be packaged into a zip archive and deployed to Kubernetes.
+        Creates a new Fission function with the specified configuration.
+        Supports creating functions with code, archives, containers, and various runtime settings.
       operationId: createFunction
       tags:
         - Functions
@@ -67,61 +80,35 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateFunctionRequest'
-            example:
-              name: hello-world
-              environment: python
-              code: |
-                def main():
-                    return "Hello, World!"
       responses:
         '201':
-          description: Function created or updated successfully
+          description: Function created successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CreateFunctionResponse'
-              examples:
-                created:
-                  value:
-                    message: "Function created successfully"
-                    name: hello-world
-                updated:
-                  value:
-                    message: "Function updated successfully"
-                    name: hello-world
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
         '400':
           description: Bad request - invalid input
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-              examples:
-                missing_name:
-                  value:
-                    error: "name is required"
-                missing_environment:
-                  value:
-                    error: "environment is required"
-                missing_code:
-                  value:
-                    error: "code is required"
-                invalid_body:
-                  value:
-                    error: "Invalid request body: invalid character '}' looking for beginning of object key string"
         '500':
           description: Internal server error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: "failed to create or update function: internal error"
 
   /api/v1/functions/{name}:
     get:
-      summary: Get a specific Fission function
-      description: |
-        Retrieves detailed information about a specific Fission function by name.
+      summary: Get a specific Fission function source code
+      description: Retrieves the source code of a specific Fission function.
       operationId: getFunction
       tags:
         - Functions
@@ -129,32 +116,66 @@ paths:
         - name: name
           in: path
           required: true
-          description: Name of the function
           schema:
             type: string
-            example: hello-world
         - name: namespace
           in: query
           required: false
-          description: Kubernetes namespace (defaults to ai-code)
           schema:
             type: string
-            example: ai-code
       responses:
         '200':
-          description: Successful response with function details
+          description: Successful response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GetFunctionResponse'
+                type: object
+                properties:
+                  output:
+                    type: string
         '404':
           description: Function not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: "function 'hello-world' not found in namespace 'ai-code'"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      summary: Update a Fission function
+      description: Updates an existing Fission function with new configuration.
+      operationId: updateFunction
+      tags:
+        - Functions
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFunctionRequest'
+      responses:
+        '200':
+          description: Function updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
         '500':
           description: Internal server error
           content:
@@ -164,8 +185,7 @@ paths:
 
     delete:
       summary: Delete a Fission function
-      description: |
-        Deletes a Fission function by name. This operation cannot be undone.
+      description: Deletes a Fission function by name.
       operationId: deleteFunction
       tags:
         - Functions
@@ -173,32 +193,77 @@ paths:
         - name: name
           in: path
           required: true
-          description: Name of the function to delete
           schema:
             type: string
-            example: hello-world
         - name: namespace
           in: query
           required: false
-          description: Kubernetes namespace (defaults to ai-code)
           schema:
             type: string
-            example: ai-code
+        - name: ignore_not_found
+          in: query
+          required: false
+          schema:
+            type: boolean
       responses:
         '200':
           description: Function deleted successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeleteFunctionResponse'
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
         '404':
           description: Function not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: "function 'hello-world' not found in namespace 'ai-code'"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/functions/{name}/meta:
+    get:
+      summary: Get function metadata
+      description: Retrieves metadata information about a Fission function.
+      operationId: getFunctionMeta
+      tags:
+        - Functions
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '404':
+          description: Function not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Internal server error
           content:
@@ -209,9 +274,7 @@ paths:
   /api/v1/functions/{name}/test:
     post:
       summary: Test/invoke a Fission function
-      description: |
-        Invokes a Fission function and returns the response. This endpoint tests the function
-        by making an HTTP request to the function's trigger endpoint.
+      description: Invokes a Fission function and returns the response.
       operationId: testFunction
       tags:
         - Functions
@@ -219,40 +282,44 @@ paths:
         - name: name
           in: path
           required: true
-          description: Name of the function to test
           schema:
             type: string
-            example: hello-world
         - name: namespace
           in: query
           required: false
-          description: Kubernetes namespace (defaults to ai-code)
           schema:
             type: string
-            example: ai-code
       requestBody:
         required: false
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TestFunctionRequest'
-            example:
-              body: '{"key": "value"}'
-              headers:
-                Content-Type: application/json
+              type: object
+              properties:
+                body:
+                  type: string
+                headers:
+                  type: object
+                  additionalProperties:
+                    type: string
+                query:
+                  type: string
+                method:
+                  type: string
+                timeout:
+                  type: integer
+                subpath:
+                  type: string
       responses:
         '200':
           description: Function invoked successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TestFunctionResponse'
-        '404':
-          description: Function not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                type: object
+                properties:
+                  output:
+                    type: string
         '500':
           description: Internal server error
           content:
@@ -263,9 +330,7 @@ paths:
   /api/v1/functions/{name}/logs:
     get:
       summary: Get function logs
-      description: |
-        Retrieves logs from pods running the specified Fission function.
-        Supports filtering by time range and limiting the number of lines returned.
+      description: Retrieves logs from pods running the specified Fission function.
       operationId: getFunctionLogs
       tags:
         - Functions
@@ -273,47 +338,210 @@ paths:
         - name: name
           in: path
           required: true
-          description: Name of the function
           schema:
             type: string
-            example: hello-world
         - name: namespace
           in: query
           required: false
-          description: Kubernetes namespace (defaults to ai-code)
           schema:
             type: string
-            example: ai-code
-        - name: tail
+        - name: pod
           in: query
           required: false
-          description: Number of lines to tail from the end of logs
-          schema:
-            type: integer
-            example: 100
-        - name: since
-          in: query
-          required: false
-          description: Time range to retrieve logs (e.g., "5m", "1h")
           schema:
             type: string
-            example: 5m
         - name: follow
           in: query
           required: false
-          description: Follow logs (streaming) - currently not supported
           schema:
             type: boolean
-            default: false
+        - name: detail
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: dbtype
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: reverse
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: recordcount
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: all_pods
+          in: query
+          required: false
+          schema:
+            type: boolean
       responses:
         '200':
           description: Successful response with function logs
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GetFunctionLogsResponse'
+                type: object
+                properties:
+                  logs:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/functions/{name}/pods:
+    get:
+      summary: List pods for a function
+      description: Lists pods currently used by a Fission function.
+      operationId: listFunctionPods
+      tags:
+        - Functions
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # Environment endpoints
+  /api/v1/environments:
+    get:
+      summary: List all environments
+      description: Lists all Fission environments.
+      operationId: listEnvironments
+      tags:
+        - Environments
+      parameters:
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: all_namespaces
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Create an environment
+      description: Creates a new Fission environment.
+      operationId: createEnvironment
+      tags:
+        - Environments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                image:
+                  type: string
+                builder_image:
+                  type: string
+                build_command:
+                  type: string
+                poolsize:
+                  type: integer
+                namespace:
+                  type: string
+      responses:
+        '201':
+          description: Environment created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/environments/{name}:
+    get:
+      summary: Get environment details
+      description: Retrieves details about a specific environment.
+      operationId: getEnvironment
+      tags:
+        - Environments
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
         '404':
-          description: Function or pods not found
+          description: Environment not found
           content:
             application/json:
               schema:
@@ -325,11 +553,1058 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+    put:
+      summary: Update an environment
+      description: Updates an existing environment.
+      operationId: updateEnvironment
+      tags:
+        - Environments
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                image:
+                  type: string
+                builder_image:
+                  type: string
+                build_command:
+                  type: string
+                poolsize:
+                  type: integer
+                namespace:
+                  type: string
+      responses:
+        '200':
+          description: Environment updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: Delete an environment
+      description: Deletes an environment.
+      operationId: deleteEnvironment
+      tags:
+        - Environments
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: ignore_not_found
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Environment deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+        '404':
+          description: Environment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/environments/{name}/pods:
+    get:
+      summary: List pods for an environment
+      description: Lists pods currently maintained by an environment.
+      operationId: listEnvironmentPods
+      tags:
+        - Environments
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # Package endpoints
+  /api/v1/packages:
+    get:
+      summary: List all packages
+      description: Lists all Fission packages.
+      operationId: listPackages
+      tags:
+        - Packages
+      parameters:
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: all_namespaces
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: orphan
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Create a package
+      description: Creates a new Fission package.
+      operationId: createPackage
+      tags:
+        - Packages
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                environment:
+                  type: string
+                code:
+                  type: string
+                source_archive:
+                  type: string
+                deploy_archive:
+                  type: string
+                namespace:
+                  type: string
+      responses:
+        '201':
+          description: Package created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/packages/{name}:
+    get:
+      summary: Get package info
+      description: Retrieves information about a package.
+      operationId: getPackageInfo
+      tags:
+        - Packages
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      summary: Update a package
+      description: Updates an existing package.
+      operationId: updatePackage
+      tags:
+        - Packages
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                environment:
+                  type: string
+                code:
+                  type: string
+                namespace:
+                  type: string
+      responses:
+        '200':
+          description: Package updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: Delete a package
+      description: Deletes a package.
+      operationId: deletePackage
+      tags:
+        - Packages
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: ignore_not_found
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: orphan
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Package deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/packages/{name}/src:
+    get:
+      summary: Get package source
+      description: Retrieves the source archive of a package.
+      operationId: getPackageSource
+      tags:
+        - Packages
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/packages/{name}/deploy:
+    get:
+      summary: Get package deployment archive
+      description: Retrieves the deployment archive of a package.
+      operationId: getPackageDeploy
+      tags:
+        - Packages
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/packages/{name}/rebuild:
+    post:
+      summary: Rebuild a package
+      description: Rebuilds a failed package.
+      operationId: rebuildPackage
+      tags:
+        - Packages
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Package rebuild initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # HTTP Trigger endpoints
+  /api/v1/httptriggers:
+    get:
+      summary: List all HTTP triggers
+      description: Lists all HTTP triggers.
+      operationId: listHTTPTriggers
+      tags:
+        - HTTP Triggers
+      parameters:
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: all_namespaces
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: function
+          in: query
+          required: false
+          schema:
+            type: string
+            description: Filter by function name
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Create an HTTP trigger
+      description: Creates a new HTTP trigger.
+      operationId: createHTTPTrigger
+      tags:
+        - HTTP Triggers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                function:
+                  type: string
+                url:
+                  type: string
+                method:
+                  type: string
+                prefix:
+                  type: string
+      responses:
+        '201':
+          description: HTTP trigger created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/httptriggers/{name}:
+    get:
+      summary: Get HTTP trigger details
+      description: Retrieves details about a specific HTTP trigger.
+      operationId: getHTTPTrigger
+      tags:
+        - HTTP Triggers
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '404':
+          description: HTTP trigger not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      summary: Update an HTTP trigger
+      description: Updates an existing HTTP trigger.
+      operationId: updateHTTPTrigger
+      tags:
+        - HTTP Triggers
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                function:
+                  type: string
+                url:
+                  type: string
+                method:
+                  type: string
+      responses:
+        '200':
+          description: HTTP trigger updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: Delete an HTTP trigger
+      description: Deletes an HTTP trigger.
+      operationId: deleteHTTPTrigger
+      tags:
+        - HTTP Triggers
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: ignore_not_found
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: HTTP trigger deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+        '404':
+          description: HTTP trigger not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # Time Trigger endpoints
+  /api/v1/timetriggers:
+    get:
+      summary: List all time triggers
+      description: Lists all time triggers.
+      operationId: listTimeTriggers
+      tags:
+        - Time Triggers
+      parameters:
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Create a time trigger
+      description: Creates a new time trigger (cron job).
+      operationId: createTimeTrigger
+      tags:
+        - Time Triggers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                function:
+                  type: string
+                cron:
+                  type: string
+      responses:
+        '201':
+          description: Time trigger created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/timetriggers/{name}:
+    delete:
+      summary: Delete a time trigger
+      description: Deletes a time trigger.
+      operationId: deleteTimeTrigger
+      tags:
+        - Time Triggers
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Time trigger deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # MQ Trigger endpoints
+  /api/v1/mqtriggers:
+    get:
+      summary: List all MQ triggers
+      description: Lists all message queue triggers.
+      operationId: listMQTriggers
+      tags:
+        - MQ Triggers
+      parameters:
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Create an MQ trigger
+      description: Creates a new message queue trigger.
+      operationId: createMQTrigger
+      tags:
+        - MQ Triggers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                function:
+                  type: string
+                mqtype:
+                  type: string
+                topic:
+                  type: string
+      responses:
+        '201':
+          description: MQ trigger created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/mqtriggers/{name}:
+    delete:
+      summary: Delete an MQ trigger
+      description: Deletes a message queue trigger.
+      operationId: deleteMQTrigger
+      tags:
+        - MQ Triggers
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: MQ trigger deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # KubeWatch endpoints
+  /api/v1/kubewatches:
+    get:
+      summary: List all KubeWatches
+      description: Lists all Kubernetes watches.
+      operationId: listKubeWatches
+      tags:
+        - KubeWatches
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Create a KubeWatch
+      description: Creates a new Kubernetes watch trigger.
+      operationId: createKubeWatch
+      tags:
+        - KubeWatches
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                function:
+                  type: string
+                type:
+                  type: string
+                  description: Kubernetes object type to watch
+      responses:
+        '201':
+          description: KubeWatch created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/kubewatches/{name}:
+    delete:
+      summary: Delete a KubeWatch
+      description: Deletes a Kubernetes watch trigger.
+      operationId: deleteKubeWatch
+      tags:
+        - KubeWatches
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: KubeWatch deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # System endpoints
+  /api/v1/version:
+    get:
+      summary: Get version information
+      description: Returns Fission version information.
+      operationId: getVersion
+      tags:
+        - System
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/check:
+    get:
+      summary: Check system status
+      description: Performs a system check to verify Fission installation and connectivity.
+      operationId: check
+      tags:
+        - System
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/plugins:
+    get:
+      summary: List plugins
+      description: Lists available Fission plugins.
+      operationId: listPlugins
+      tags:
+        - System
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /health:
     get:
       summary: Health check endpoint
-      description: |
-        Returns a simple health check response to verify the server is running.
+      description: Returns a simple health check response to verify the server is running.
       operationId: healthCheck
       tags:
         - Health
@@ -344,96 +1619,129 @@ paths:
 
 components:
   schemas:
-    FunctionInfo:
+    CreateFunctionRequest:
       type: object
-      description: Information about a Fission function
+      description: Request body for creating a function
       properties:
         name:
           type: string
           description: Name of the function
           example: hello-world
-        namespace:
-          type: string
-          description: Kubernetes namespace where the function is deployed
-          example: ai-code
-        runtime:
-          type: string
-          description: Runtime image used by the function
-          example: fission/python-env:latest
-          nullable: true
-        env:
-          type: string
-          description: Environment name (e.g., python, nodejs)
-          example: python
-          nullable: true
-        status:
-          type: string
-          description: Current status of the function
-          example: active
-          nullable: true
-        package:
-          type: string
-          description: Name of the package associated with the function
-          example: hello-world-pkg
-          nullable: true
-      required:
-        - name
-        - namespace
-
-    ListFunctionsResponse:
-      type: object
-      description: Response containing a list of functions
-      properties:
-        functions:
-          type: array
-          items:
-            $ref: '#/components/schemas/FunctionInfo'
-          description: List of Fission functions
-        count:
-          type: integer
-          description: Total number of functions
-          example: 2
-      required:
-        - functions
-        - count
-
-    CreateFunctionRequest:
-      type: object
-      description: Request body for creating or updating a function (upsert operation)
-      properties:
-        name:
-          type: string
-          description: Name of the function to create
-          example: hello-world
         environment:
           type: string
-          description: Environment name (e.g., python, nodejs)
+          description: Environment name
           example: python
+        package_name:
+          type: string
+          description: Package name to use
+        entrypoint:
+          type: string
+          description: Entry point function name
+        executor_type:
+          type: string
+          description: Executor type (poolmgr, newdeploy, container)
         code:
           type: string
           description: Source code for the function
-          example: |
-            def main():
-                return "Hello, World!"
-      required:
-        - name
-        - environment
-        - code
-
-    CreateFunctionResponse:
-      type: object
-      description: Response after creating or updating a function
-      properties:
-        message:
+        source_archive:
           type: string
-          description: Success message indicating whether the function was created or updated
-          example: "Function created successfully"
-        name:
+          description: Source archive URL or path
+        deploy_archive:
           type: string
-          description: Name of the created function
-          example: hello-world
+          description: Deployment archive URL or path
+        source_checksum:
+          type: string
+          description: Source archive checksum
+        deploy_checksum:
+          type: string
+          description: Deployment archive checksum
+        insecure:
+          type: boolean
+          description: Allow insecure connections
+        build_command:
+          type: string
+          description: Build command for the package
+        secrets:
+          type: array
+          items:
+            type: string
+          description: List of secret names
+        configmaps:
+          type: array
+          items:
+            type: string
+          description: List of configmap names
+        specialization_timeout:
+          type: integer
+          description: Specialization timeout in seconds
+        execution_timeout:
+          type: integer
+          description: Execution timeout in seconds
+        idle_timeout:
+          type: integer
+          description: Idle timeout in seconds
+        concurrency:
+          type: integer
+          description: Function concurrency limit
+        requests_per_pod:
+          type: integer
+          description: Requests per pod
+        once_only:
+          type: boolean
+          description: Execute function only once
+        retain_pods:
+          type: integer
+          description: Number of pods to retain
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          description: Labels to apply
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+          description: Annotations to apply
+        min_cpu:
+          type: string
+          description: Minimum CPU resource
+        max_cpu:
+          type: string
+          description: Maximum CPU resource
+        min_memory:
+          type: string
+          description: Minimum memory resource
+        max_memory:
+          type: string
+          description: Maximum memory resource
+        min_scale:
+          type: integer
+          description: Minimum number of replicas
+        max_scale:
+          type: integer
+          description: Maximum number of replicas
+        target_cpu:
+          type: integer
+          description: Target CPU percentage
+        namespace:
+          type: string
+          description: Kubernetes namespace
+        url:
+          type: string
+          description: HTTP trigger URL (if creating trigger)
+        method:
+          type: string
+          description: HTTP method for trigger
+        prefix:
+          type: string
+          description: URL prefix for trigger
+        spec_save:
+          type: boolean
+          description: Save to spec file
+        spec_dry:
+          type: boolean
+          description: Dry run mode
       required:
-        - message
         - name
 
     ErrorResponse:
@@ -446,88 +1754,3 @@ components:
           example: "An error occurred"
       required:
         - error
-
-    GetFunctionResponse:
-      type: object
-      description: Response containing a single function
-      properties:
-        function:
-          $ref: '#/components/schemas/FunctionInfo'
-      required:
-        - function
-
-    DeleteFunctionResponse:
-      type: object
-      description: Response after deleting a function
-      properties:
-        message:
-          type: string
-          description: Success message
-          example: "Function deleted successfully"
-        name:
-          type: string
-          description: Name of the deleted function
-          example: hello-world
-      required:
-        - message
-        - name
-
-    TestFunctionRequest:
-      type: object
-      description: Request body for testing a function
-      properties:
-        body:
-          type: string
-          description: Request body to send to the function
-          example: '{"key": "value"}'
-        headers:
-          type: object
-          description: Custom headers to include in the request
-          additionalProperties:
-            type: string
-          example:
-            Content-Type: application/json
-      required: []
-
-    TestFunctionResponse:
-      type: object
-      description: Response from testing a function
-      properties:
-        status_code:
-          type: integer
-          description: HTTP status code from the function response
-          example: 200
-        body:
-          type: string
-          description: Response body from the function
-          example: "Hello, World!"
-        headers:
-          type: object
-          description: Response headers from the function
-          additionalProperties:
-            type: array
-            items:
-              type: string
-          example:
-            Content-Type:
-              - application/json
-      required:
-        - status_code
-        - body
-        - headers
-
-    GetFunctionLogsResponse:
-      type: object
-      description: Response containing function logs
-      properties:
-        logs:
-          type: string
-          description: Log output from function pods
-          example: |
-            === Pod: ai-code/hello-world-abc123 ===
-            2024-01-01T10:00:00Z Function invoked
-            2024-01-01T10:00:01Z Processing request
-            2024-01-01T10:00:02Z Request completed
-      required:
-        - logs
-

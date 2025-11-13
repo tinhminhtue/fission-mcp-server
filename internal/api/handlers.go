@@ -86,14 +86,22 @@ func NewHandler(fissionService *fission.Service) *Handler {
 	}
 }
 
+// NewHandlerForOpenAPI creates a minimal handler just for OpenAPI endpoints
+func NewHandlerForOpenAPI() *Handler {
+	return &Handler{
+		fissionService: nil, // Not needed for OpenAPI endpoints
+	}
+}
+
 // ListFunctionsResponse represents the response for listing functions
 type ListFunctionsResponse struct {
 	Functions []fission.FunctionInfo `json:"functions"`
 	Count     int                    `json:"count"`
 }
 
-// CreateFunctionRequest represents the request body for creating a function
-type CreateFunctionRequest struct {
+// LegacyCreateFunctionRequest represents the legacy request body for creating a function
+// This is kept for backward compatibility but new code should use handlers_function.go
+type LegacyCreateFunctionRequest struct {
 	Name        string `json:"name"`
 	Environment string `json:"environment"`
 	Code        string `json:"code"`
