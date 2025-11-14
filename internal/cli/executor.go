@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/fission/fission/pkg/fission-cli/cmd"
 	wCli "github.com/fission/fission/pkg/fission-cli/cliwrapper/cli"
+	"github.com/fission/fission/pkg/fission-cli/cmd"
 )
 
 // Executor wraps fission-cli command execution
@@ -45,19 +45,51 @@ func (e *Executor) ExecuteCommand(action cmd.CommandAction, input wCli.Input) er
 func (e *Executor) ExecuteCommandWithOutput(action cmd.CommandAction, input wCli.Input) (string, string, error) {
 	var stdoutBuf, stderrBuf bytes.Buffer
 
-	// Create new input with custom writers
-	httpInput, ok := input.(*HTTPInput)
-	if ok {
-		httpInput.stdout = &stdoutBuf
-		httpInput.stderr = &stderrBuf
-	} else {
-		// If input is not HTTPInput, we need to wrap it
-		// For now, create a new HTTPInput-like wrapper
-		// This shouldn't happen in practice since we always use HTTPInput
-		return "", "", fmt.Errorf("unexpected input type")
+	// Redirect stdout and stderr to capture command output
+	oldStdout := os.Stdout
+	oldStderr := os.Stderr
+
+	// Create pipes to capture output
+	stdoutR, stdoutW, _ := os.Pipe()
+	stderrR, stderrW, _ := os.Pipe()
+
+	// Redirect stdout and stderr
+	os.Stdout = stdoutW
+	os.Stderr = stderrW
+
+	// Create a channel to signal when goroutine is done
+	done := make(chan error, 1)
+
+	// Start goroutine to copy output to our buffers
+	go func() {
+		_, err := io.Copy(&stdoutBuf, stdoutR)
+		if err != nil {
+			done <- err
+			return
+		}
+		_, err = io.Copy(&stderrBuf, stderrR)
+		done <- err
+	}()
+
+	// Execute the command
+	err := action(input)
+
+	// Close writers to signal copying is complete
+	stdoutW.Close()
+	stderrW.Close()
+
+	// Wait for copying to complete
+	copyErr := <-done
+
+	// Restore original stdout and stderr
+	os.Stdout = oldStdout
+	os.Stderr = oldStderr
+
+	// If there was a copy error, return it
+	if copyErr != nil {
+		return "", "", copyErr
 	}
 
-	err := action(input)
 	stdout := stdoutBuf.String()
 	stderr := stderrBuf.String()
 
@@ -84,4 +116,3 @@ func NewHTTPInputFromRequest(r *http.Request) wCli.Input {
 func NewHTTPInputFromRequestWithWriters(r *http.Request, stdout, stderr io.Writer) wCli.Input {
 	return NewHTTPInput(r, stdout, stderr)
 }
-
