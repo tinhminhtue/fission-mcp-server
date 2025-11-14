@@ -1,4 +1,4 @@
-.PHONY: build build-linux build-darwin build-windows test clean run help
+.PHONY: build build-linux build-darwin build-windows test test-smoke clean run help
 
 # Binary name
 BINARY_NAME=fission-mcp-server
@@ -9,25 +9,25 @@ LDFLAGS=-ldflags "-s -w"
 # Default target
 .DEFAULT_GOAL := help
 
-## build: Build the binary for current platform
+## build: Build binary for current platform
 build:
 	@echo "Building $(BINARY_NAME)..."
 	@go build $(LDFLAGS) -o $(BINARY_NAME) ./cmd/server
 	@echo "Build complete: $(BINARY_NAME)"
 
-## build-linux: Build the binary for Linux
+## build-linux: Build binary for Linux
 build-linux:
 	@echo "Building $(BINARY_NAME) for Linux..."
 	@GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-linux ./cmd/server
 	@echo "Build complete: $(BINARY_NAME)-linux"
 
-## build-darwin: Build the binary for macOS
+## build-darwin: Build binary for macOS
 build-darwin:
 	@echo "Building $(BINARY_NAME) for macOS..."
 	@GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-darwin ./cmd/server
 	@echo "Build complete: $(BINARY_NAME)-darwin"
 
-## build-windows: Build the binary for Windows
+## build-windows: Build binary for Windows
 build-windows:
 	@echo "Building $(BINARY_NAME) for Windows..."
 	@GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-windows.exe ./cmd/server
@@ -42,6 +42,12 @@ test:
 	@echo "Running tests..."
 	@go test -v ./...
 
+## test-smoke: Run Function API smoke tests
+test-smoke:
+	@echo "Running Function API smoke tests..."
+	@echo "Make sure fission-mcp-server is running before executing smoke tests"
+	@go test -v ./tests/
+
 ## test-coverage: Run tests with coverage
 test-coverage:
 	@echo "Running tests with coverage..."
@@ -49,9 +55,9 @@ test-coverage:
 	@go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
-## run: Run the application
+## run: Run application
 run:
-	@echo "Running $(BINARY_NAME)..."
+	@echo "Running server with go run..."
 	@go run ./cmd/server
 
 ## clean: Remove build artifacts
@@ -87,4 +93,3 @@ deps:
 help:
 	@echo "Available targets:"
 	@grep -E '^##' Makefile | sed 's/## //'
-

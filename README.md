@@ -43,13 +43,31 @@ make build
 ### Run
 
 ```bash
+# Using Go run (recommended for development)
+go run ./cmd/server
+
+# Or with pre-built binary
 ./fission-mcp-server
 ```
 
-Or directly with Go:
+### VS Code Debug Configuration
 
-```bash
-go run main.go
+For VS Code debugging, use this launch configuration in `.vscode/launch.json`:
+
+```json
+{
+  "name": "Debug Server",
+  "type": "go",
+  "request": "launch",
+  "mode": "debug",
+  "program": "${workspaceFolder}/cmd/server",
+  "env": {
+    "FISSION_ROUTER_URL": "http://router.fission.svc.cluster.local"
+  },
+  "args": [],
+  "showLog": true,
+  "trace": "log"
+}
 ```
 
 ## Usage
@@ -100,6 +118,23 @@ fission-mcp-server/
 ```bash
 make test
 ```
+
+### Running Function API Smoke Tests
+
+The project includes integration smoke tests for Function API endpoints that verify all CRUD operations work correctly against a real Fission server.
+
+```bash
+# Start the server first
+./fission-mcp-server
+
+# In another terminal, run smoke tests
+make test-smoke
+
+# Or run directly with go
+go test -v ./tests/
+```
+
+See [tests/README.md](tests/README.md) for detailed smoke test documentation.
 
 ### Building for Different Platforms
 
