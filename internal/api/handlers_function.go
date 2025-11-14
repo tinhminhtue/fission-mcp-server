@@ -26,42 +26,43 @@ func NewFunctionHandler(executor *cli.Executor) *FunctionHandler {
 
 // CreateFunctionRequest represents request for creating a function
 type CreateFunctionRequest struct {
-	Name                    string            `json:"name"`
-	Environment             string            `json:"environment,omitempty"`
-	PackageName             string            `json:"package_name,omitempty"`
-	EntryPoint              string            `json:"entrypoint,omitempty"`
-	ExecutorType            string            `json:"executor_type,omitempty"`
-	Code                    string            `json:"code,omitempty"`
-	SourceArchive           string            `json:"source_archive,omitempty"`
-	DeployArchive           string            `json:"deploy_archive,omitempty"`
-	SourceChecksum          string            `json:"source_checksum,omitempty"`
-	DeployChecksum          string            `json:"deploy_checksum,omitempty"`
-	Insecure                bool              `json:"insecure,omitempty"`
-	BuildCommand            string            `json:"build_command,omitempty"`
-	Secrets                 []string          `json:"secrets,omitempty"`
-	ConfigMaps              []string          `json:"configmaps,omitempty"`
-	SpecializationTimeout   int               `json:"specialization_timeout,omitempty"`
-	ExecutionTimeout        int               `json:"execution_timeout,omitempty"`
-	IdleTimeout             int               `json:"idle_timeout,omitempty"`
-	Concurrency             int               `json:"concurrency,omitempty"`
-	RequestsPerPod           int               `json:"requests_per_pod,omitempty"`
-	OnceOnly                bool              `json:"once_only,omitempty"`
-	RetainPods              int               `json:"retain_pods,omitempty"`
-	Labels                  map[string]string `json:"labels,omitempty"`
-	Annotations             map[string]string `json:"annotations,omitempty"`
-	MinCPU                  string            `json:"min_cpu,omitempty"`
-	MaxCPU                  string            `json:"max_cpu,omitempty"`
-	MinMemory               string            `json:"min_memory,omitempty"`
-	MaxMemory               string            `json:"max_memory,omitempty"`
-	MinScale                int               `json:"min_scale,omitempty"`
-	MaxScale                int               `json:"max_scale,omitempty"`
-	TargetCPU               int               `json:"target_cpu,omitempty"`
-	Namespace               string            `json:"namespace,omitempty"`
-	URL                     string            `json:"url,omitempty"`
-	Method                  string            `json:"method,omitempty"`
-	Prefix                  string            `json:"prefix,omitempty"`
-	SpecSave                bool              `json:"spec_save,omitempty"`
-	SpecDry                 bool              `json:"spec_dry,omitempty"`
+	Name                  string            `json:"name"`
+	Environment           string            `json:"environment,omitempty"`
+	PackageName           string            `json:"package_name,omitempty"`
+	EntryPoint            string            `json:"entrypoint,omitempty"`
+	ExecutorType          string            `json:"executor_type,omitempty"`
+	Code                  string            `json:"code,omitempty"`
+	CodeFile              string            `json:"code_file,omitempty"`
+	SourceArchive         string            `json:"source_archive,omitempty"`
+	DeployArchive         string            `json:"deploy_archive,omitempty"`
+	SourceChecksum        string            `json:"source_checksum,omitempty"`
+	DeployChecksum        string            `json:"deploy_checksum,omitempty"`
+	Insecure              bool              `json:"insecure,omitempty"`
+	BuildCommand          string            `json:"build_command,omitempty"`
+	Secrets               []string          `json:"secrets,omitempty"`
+	ConfigMaps            []string          `json:"configmaps,omitempty"`
+	SpecializationTimeout int               `json:"specialization_timeout,omitempty"`
+	ExecutionTimeout      int               `json:"execution_timeout,omitempty"`
+	IdleTimeout           int               `json:"idle_timeout,omitempty"`
+	Concurrency           int               `json:"concurrency,omitempty"`
+	RequestsPerPod        int               `json:"requests_per_pod,omitempty"`
+	OnceOnly              bool              `json:"once_only,omitempty"`
+	RetainPods            int               `json:"retain_pods,omitempty"`
+	Labels                map[string]string `json:"labels,omitempty"`
+	Annotations           map[string]string `json:"annotations,omitempty"`
+	MinCPU                string            `json:"min_cpu,omitempty"`
+	MaxCPU                string            `json:"max_cpu,omitempty"`
+	MinMemory             string            `json:"min_memory,omitempty"`
+	MaxMemory             string            `json:"max_memory,omitempty"`
+	MinScale              int               `json:"min_scale,omitempty"`
+	MaxScale              int               `json:"max_scale,omitempty"`
+	TargetCPU             int               `json:"target_cpu,omitempty"`
+	Namespace             string            `json:"namespace,omitempty"`
+	URL                   string            `json:"url,omitempty"`
+	Method                string            `json:"method,omitempty"`
+	Prefix                string            `json:"prefix,omitempty"`
+	SpecSave              bool              `json:"spec_save,omitempty"`
+	SpecDry               bool              `json:"spec_dry,omitempty"`
 }
 
 // CreateFunction handles POST /api/v1/functions
@@ -102,7 +103,9 @@ func (h *FunctionHandler) CreateFunction(w http.ResponseWriter, r *http.Request)
 	if req.ExecutorType != "" {
 		httpInput.SetValue(flagkey.FnExecutorType, req.ExecutorType)
 	}
-	if req.Code != "" {
+	if req.CodeFile != "" {
+		httpInput.SetValue(flagkey.PkgCode, req.CodeFile)
+	} else if req.Code != "" {
 		httpInput.SetValue(flagkey.PkgCode, req.Code)
 	}
 	if req.SourceArchive != "" {
@@ -207,8 +210,7 @@ func (h *FunctionHandler) CreateFunction(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Execute create command
-
-	err := h.executor.ExecuteCommand(function.Create, httpInput)
+	stdout, stderr, err := h.executor.ExecuteCommandWithOutput(function.Create, httpInput)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -217,6 +219,8 @@ func (h *FunctionHandler) CreateFunction(w http.ResponseWriter, r *http.Request)
 	response := map[string]interface{}{
 		"message": "Function created successfully",
 		"name":    req.Name,
+		"stdout":  stdout,
+		"stderr":  stderr,
 	}
 	h.writeJSON(w, http.StatusCreated, response)
 }
@@ -239,7 +243,7 @@ func (h *FunctionHandler) ListFunctions(w http.ResponseWriter, r *http.Request) 
 		httpInput.SetValue(flagkey.AllNamespaces, true)
 	}
 
-	err := h.executor.ExecuteCommand(function.List, httpInput)
+	stdout, stderr, err := h.executor.ExecuteCommandWithOutput(function.List, httpInput)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -248,7 +252,8 @@ func (h *FunctionHandler) ListFunctions(w http.ResponseWriter, r *http.Request) 
 	// Parse tabular output and convert to JSON
 	// For now, return the raw output
 	response := map[string]interface{}{
-		"output": stdoutBuf.String(),
+		"output": stdout,
+		"stderr": stderr,
 	}
 	h.writeJSON(w, http.StatusOK, response)
 }
@@ -274,7 +279,7 @@ func (h *FunctionHandler) GetFunction(w http.ResponseWriter, r *http.Request) {
 		httpInput.SetValue(flagkey.NamespaceFunction, namespace)
 	}
 
-	err := h.executor.ExecuteCommand(function.Get, httpInput)
+	stdout, stderr, err := h.executor.ExecuteCommandWithOutput(function.Get, httpInput)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			h.writeError(w, http.StatusNotFound, err.Error())
@@ -285,7 +290,8 @@ func (h *FunctionHandler) GetFunction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"output": stdoutBuf.String(),
+		"output": stdout,
+		"stderr": stderr,
 	}
 	h.writeJSON(w, http.StatusOK, response)
 }
@@ -311,7 +317,7 @@ func (h *FunctionHandler) GetFunctionMeta(w http.ResponseWriter, r *http.Request
 		httpInput.SetValue(flagkey.NamespaceFunction, namespace)
 	}
 
-	err := h.executor.ExecuteCommand(function.GetMeta, httpInput)
+	stdout, stderr, err := h.executor.ExecuteCommandWithOutput(function.GetMeta, httpInput)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			h.writeError(w, http.StatusNotFound, err.Error())
@@ -322,7 +328,8 @@ func (h *FunctionHandler) GetFunctionMeta(w http.ResponseWriter, r *http.Request
 	}
 
 	response := map[string]interface{}{
-		"output": stdoutBuf.String(),
+		"output": stdout,
+		"stderr": stderr,
 	}
 	h.writeJSON(w, http.StatusOK, response)
 }
@@ -363,7 +370,9 @@ func (h *FunctionHandler) UpdateFunction(w http.ResponseWriter, r *http.Request)
 	if req.ExecutorType != "" {
 		httpInput.SetValue(flagkey.FnExecutorType, req.ExecutorType)
 	}
-	if req.Code != "" {
+	if req.CodeFile != "" {
+		httpInput.SetValue(flagkey.PkgCode, req.CodeFile)
+	} else if req.Code != "" {
 		httpInput.SetValue(flagkey.PkgCode, req.Code)
 	}
 	if req.SourceArchive != "" {
@@ -406,7 +415,7 @@ func (h *FunctionHandler) UpdateFunction(w http.ResponseWriter, r *http.Request)
 		httpInput.SetValue(flagkey.SpecSave, true)
 	}
 
-	err := h.executor.ExecuteCommand(function.Update, httpInput)
+	stdout, stderr, err := h.executor.ExecuteCommandWithOutput(function.Update, httpInput)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -415,6 +424,8 @@ func (h *FunctionHandler) UpdateFunction(w http.ResponseWriter, r *http.Request)
 	response := map[string]interface{}{
 		"message": "Function updated successfully",
 		"name":    name,
+		"stdout":  stdout,
+		"stderr":  stderr,
 	}
 	h.writeJSON(w, http.StatusOK, response)
 }
@@ -443,7 +454,7 @@ func (h *FunctionHandler) DeleteFunction(w http.ResponseWriter, r *http.Request)
 		httpInput.SetValue(flagkey.IgnoreNotFound, true)
 	}
 
-	err := h.executor.ExecuteCommand(function.Delete, httpInput)
+	stdout, stderr, err := h.executor.ExecuteCommandWithOutput(function.Delete, httpInput)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			h.writeError(w, http.StatusNotFound, err.Error())
@@ -456,6 +467,8 @@ func (h *FunctionHandler) DeleteFunction(w http.ResponseWriter, r *http.Request)
 	response := map[string]interface{}{
 		"message": "Function deleted successfully",
 		"name":    name,
+		"stdout":  stdout,
+		"stderr":  stderr,
 	}
 	h.writeJSON(w, http.StatusOK, response)
 }
@@ -516,14 +529,15 @@ func (h *FunctionHandler) TestFunction(w http.ResponseWriter, r *http.Request) {
 		httpInput.SetValue(flagkey.NamespaceFunction, namespace)
 	}
 
-	err := h.executor.ExecuteCommand(function.Test, httpInput)
+	stdout, stderr, err := h.executor.ExecuteCommandWithOutput(function.Test, httpInput)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	response := map[string]interface{}{
-		"output": stdoutBuf.String(),
+		"output": stdout,
+		"stderr": stderr,
 	}
 	h.writeJSON(w, http.StatusOK, response)
 }
@@ -572,14 +586,15 @@ func (h *FunctionHandler) GetFunctionLogs(w http.ResponseWriter, r *http.Request
 		httpInput.SetValue(flagkey.FnLogAllPods, true)
 	}
 
-	err := h.executor.ExecuteCommand(function.Log, httpInput)
+	stdout, stderr, err := h.executor.ExecuteCommandWithOutput(function.Log, httpInput)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	response := map[string]interface{}{
-		"logs": stdoutBuf.String(),
+		"logs":   stdout,
+		"stderr": stderr,
 	}
 	h.writeJSON(w, http.StatusOK, response)
 }
@@ -605,14 +620,15 @@ func (h *FunctionHandler) ListFunctionPods(w http.ResponseWriter, r *http.Reques
 		httpInput.SetValue(flagkey.NamespaceFunction, namespace)
 	}
 
-	err := h.executor.ExecuteCommand(function.ListPods, httpInput)
+	stdout, stderr, err := h.executor.ExecuteCommandWithOutput(function.ListPods, httpInput)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	response := map[string]interface{}{
-		"output": stdoutBuf.String(),
+		"output": stdout,
+		"stderr": stderr,
 	}
 	h.writeJSON(w, http.StatusOK, response)
 }
@@ -635,4 +651,3 @@ func (h *FunctionHandler) writeJSON(w http.ResponseWriter, statusCode int, data 
 func (h *FunctionHandler) writeError(w http.ResponseWriter, statusCode int, message string) {
 	h.writeJSON(w, statusCode, map[string]interface{}{"error": message})
 }
-

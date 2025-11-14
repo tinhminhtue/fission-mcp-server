@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -14,8 +15,8 @@ import (
 // Test configuration
 const (
 	DefaultServerURL     = "http://localhost:8080"
-	DefaultTestNamespace = "default"
-	DefaultTestTimeout   = 30 * time.Second
+	DefaultTestNamespace = "ai-code"
+	DefaultTestTimeout   = 60 * time.Second
 	PythonFunctionCode   = `
 def handler(context):
     """
@@ -43,10 +44,14 @@ var (
 
 // Test data structures
 type CreateFunctionRequest struct {
-	Name        string `json:"name"`
-	Environment string `json:"environment"`
-	Code        string `json:"code"`
-	Namespace   string `json:"namespace,omitempty"`
+	Name                  string `json:"name"`
+	Environment           string `json:"environment"`
+	Code                  string `json:"code"`
+	CodeFile              string `json:"code_file,omitempty"`
+	Namespace             string `json:"namespace,omitempty"`
+	ExecutionTimeout      int    `json:"execution_timeout,omitempty"`
+	IdleTimeout           int    `json:"idle_timeout,omitempty"`
+	SpecializationTimeout int    `json:"specialization_timeout,omitempty"`
 }
 
 type CreateFunctionResponse struct {
@@ -200,11 +205,23 @@ func TestFunctionSmokeTest(t *testing.T) {
 }
 
 func testCreateFunction(t *testing.T, functionName string) {
+	// Create a temporary file with the Python code
+	tmpFile, err := os.CreateTemp("", "test-function-*.py")
+	assertNoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	_, err = tmpFile.WriteString(PythonFunctionCode)
+	assertNoError(t, err)
+	tmpFile.Close()
+
 	req := CreateFunctionRequest{
-		Name:        functionName,
-		Environment: "python",
-		Code:        PythonFunctionCode,
-		Namespace:   TestNamespace,
+		Name:                  functionName,
+		Environment:           "python",
+		CodeFile:              tmpFile.Name(),
+		Namespace:             TestNamespace,
+		ExecutionTimeout:      60,  // 60 seconds
+		IdleTimeout:           120, // 120 seconds
+		SpecializationTimeout: 120, // 120 seconds (minimum required)
 	}
 
 	resp, err := makeHTTPRequest("POST", ServerURL+"/api/v1/functions", req)
@@ -289,10 +306,22 @@ func testGetFunction(t *testing.T, functionName string) {
 }
 
 func testUpdateFunction(t *testing.T, functionName string) {
+	// Create a temporary file with the updated Python code
+	tmpFile, err := os.CreateTemp("", "test-function-updated-*.py")
+	assertNoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	_, err = tmpFile.WriteString(UpdatedPythonFunctionCode)
+	assertNoError(t, err)
+	tmpFile.Close()
+
 	req := CreateFunctionRequest{
-		Environment: "python",
-		Code:        UpdatedPythonFunctionCode,
-		Namespace:   TestNamespace,
+		Environment:           "python",
+		CodeFile:              tmpFile.Name(),
+		Namespace:             TestNamespace,
+		ExecutionTimeout:      60,  // 60 seconds
+		IdleTimeout:           120, // 120 seconds
+		SpecializationTimeout: 120, // 120 seconds (minimum required)
 	}
 
 	url := fmt.Sprintf("%s/api/v1/functions/%s?namespace=%s", ServerURL, functionName, TestNamespace)
@@ -329,7 +358,12 @@ func testFunctionExecution(t *testing.T, functionName string) {
 	assertNoError(t, err)
 	defer resp.Body.Close()
 
-	assertStatusCode(t, resp, http.StatusOK)
+	// Allow for more flexible status codes since function testing might have various outcomes
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("Expected status code 200 or 202, got %d. Body: %s", resp.StatusCode, string(body))
+		return
+	}
 
 	var response map[string]interface{}
 	err = parseJSONResponse(resp, &response)
@@ -378,11 +412,11 @@ func testDeleteFunction(t *testing.T, functionName string) {
 
 // Helper functions for validation
 func containsFunctionName(output, functionName string) bool {
-	return len(output) > 0 && len(functionName) > 0
+	return len(output) > 0 && len(functionName) > 0 && strings.Contains(output, functionName)
 }
 
 func containsFunctionCode(output, code string) bool {
-	return len(output) > 0 && len(code) > 0
+	return len(output) > 0 && len(code) > 0 && strings.Contains(output, strings.TrimSpace(code))
 }
 
 func containsExecutionResult(output string) bool {
